@@ -99,7 +99,12 @@ export const calculatePaging = (
 		pageCount,
 		firstOffset: 0,
 		lastOffset: _pagingGetOffsetByPage(pagingData as PagingData, pageCount),
-	};
+		// BC
+		get previosOffset() {
+			console.warn("WARN: 'previosOffset' was renamed to 'previousOffset'");
+			return previousOffset;
+		},
+	} as any;
 };
 
 export const createPagingStore = (
