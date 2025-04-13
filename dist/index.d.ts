@@ -15,7 +15,7 @@ export interface PagingCalcResult {
     hasNext: boolean;
     hasPrevious: boolean;
     nextOffset: number;
-    previosOffset: number;
+    previousOffset: number;
     currentPage: number | false;
     pageCount: number;
     firstOffset: number;
