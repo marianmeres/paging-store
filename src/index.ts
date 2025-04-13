@@ -17,7 +17,7 @@ export interface PagingCalcResult {
 	hasNext: boolean;
 	hasPrevious: boolean;
 	nextOffset: number;
-	previosOffset: number;
+	previousOffset: number;
 	currentPage: number | false;
 	pageCount: number;
 	firstOffset: number;
@@ -45,7 +45,7 @@ const _normalize = (
 };
 
 const _pagingGetPageByOffset = ({ total, limit, offset }: PagingData) => {
-	// if nagative just substract from total
+	// if negative just subtract from total
 	if (offset < 0) {
 		offset = Math.max(0, total + offset);
 	}
@@ -80,7 +80,7 @@ export const calculatePaging = (
 	let _previousPage = Math.max(0, Math.min(currentPage - 1, pageCount - 1));
 	const previousPage = _previousPage !== 0 ? _previousPage : false;
 	const hasPrevious = previousPage !== false;
-	const previosOffset = previousPage === false ? 0 : (previousPage - 1) * limit;
+	const previousOffset = previousPage === false ? 0 : (previousPage - 1) * limit;
 
 	//
 	return {
@@ -94,7 +94,7 @@ export const calculatePaging = (
 		hasNext,
 		hasPrevious,
 		nextOffset,
-		previosOffset,
+		previousOffset,
 		currentPage,
 		pageCount,
 		firstOffset: 0,

@@ -24,7 +24,7 @@ const paging = calculatePaging({ total: 25, limit: 10, offset: 11 });
     hasNext: true,
     hasPrevious: true,
     nextOffset: 20,
-    previosOffset: 0,
+    previousOffset: 0,
     currentPage: 2,
     pageCount: 3,
     firstOffset: 0,
