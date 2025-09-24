@@ -1,4 +1,10 @@
-import { createDerivedStore, createStore, StoreReadable } from '@marianmeres/store';
+import {
+	createDerivedStore,
+	createStoragePersistor,
+	createStore,
+	CreateStoreOptions,
+	StoreReadable,
+} from '@marianmeres/store';
 
 export interface PagingData {
 	total: number;
@@ -44,7 +50,8 @@ const _normalize = (
 	return { total, limit, offset };
 };
 
-const _pagingGetPageByOffset = ({ total, limit, offset }: PagingData) => {
+/** utility  */
+export const pagingGetPageByOffset = ({ total, limit, offset }: PagingData) => {
 	// if negative just subtract from total
 	if (offset < 0) {
 		offset = Math.max(0, total + offset);
@@ -54,11 +61,16 @@ const _pagingGetPageByOffset = ({ total, limit, offset }: PagingData) => {
 	return Math.max(Math.ceil(offset / limit), 1);
 };
 
-const _pagingGetOffsetByPage = ({ total, limit, offset }: PagingData, page: number) => {
-	page = _numberOr(page, _pagingGetPageByOffset({ total, limit, offset }));
+/** utility  */
+export const pagingGetOffsetByPage = (
+	{ total, limit, offset }: PagingData,
+	page: number
+) => {
+	page = _numberOr(page, pagingGetPageByOffset({ total, limit, offset }));
 	return Math.max(limit * (page - 1), 0);
 };
 
+/**  */
 export const calculatePaging = (
 	pagingData: Partial<PagingData> = {}
 ): PagingCalcResult => {
@@ -67,7 +79,7 @@ export const calculatePaging = (
 
 	//
 	const pageCount = Math.ceil(total / limit);
-	const currentPage = _pagingGetPageByOffset(pagingData as PagingData);
+	const currentPage = pagingGetPageByOffset(pagingData as PagingData);
 	const isLast = currentPage === pageCount;
 	const isFirst = currentPage === 1;
 
@@ -98,7 +110,7 @@ export const calculatePaging = (
 		currentPage,
 		pageCount,
 		firstOffset: 0,
-		lastOffset: _pagingGetOffsetByPage(pagingData as PagingData, pageCount),
+		lastOffset: pagingGetOffsetByPage(pagingData as PagingData, pageCount),
 		// BC
 		get previosOffset() {
 			console.warn("WARN: 'previosOffset' was renamed to 'previousOffset'");
@@ -107,11 +119,16 @@ export const calculatePaging = (
 	} as any;
 };
 
+/**  */
 export const createPagingStore = (
 	pagingData: Partial<PagingData> = {},
-	defaultLimit = 10
+	defaultLimit = 10,
+	storeOptions: CreateStoreOptions<PagingData> | null = null
 ): PagingStore => {
-	const _data = createStore<PagingData>(_normalize(pagingData, defaultLimit));
+	const _data = createStore<PagingData>(
+		_normalize(pagingData, defaultLimit),
+		storeOptions
+	);
 	const paging = createDerivedStore<PagingCalcResult>([_data], ([data]) =>
 		calculatePaging(data)
 	);
@@ -124,3 +141,16 @@ export const createPagingStore = (
 		reset: (limit = null) => _data.set(_normalize({}, limit || defaultLimit)),
 	};
 };
+
+// sugar
+export function createStoragePagingStore(
+	key: string,
+	storageType: 'local' | 'session' | 'memory' = 'session',
+	initial: Partial<PagingData> = {},
+	defaultLimit = 10
+) {
+	const persistor = createStoragePersistor<PagingData>(key, storageType);
+	return createPagingStore(persistor.get() || initial, defaultLimit, {
+		persist: persistor.set,
+	});
+}

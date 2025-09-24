@@ -1,4 +1,4 @@
-import { StoreReadable } from '@marianmeres/store';
+import { CreateStoreOptions, StoreReadable } from '@marianmeres/store';
 export interface PagingData {
     total: number;
     limit: number;
@@ -25,5 +25,8 @@ export interface PagingStore extends StoreReadable<PagingCalcResult> {
     update: (pagingData: Partial<PagingData>) => void;
     reset: (limit?: any) => void;
 }
+export declare const pagingGetPageByOffset: ({ total, limit, offset }: PagingData) => number;
+export declare const pagingGetOffsetByPage: ({ total, limit, offset }: PagingData, page: number) => number;
 export declare const calculatePaging: (pagingData?: Partial<PagingData>) => PagingCalcResult;
-export declare const createPagingStore: (pagingData?: Partial<PagingData>, defaultLimit?: number) => PagingStore;
+export declare const createPagingStore: (pagingData?: Partial<PagingData>, defaultLimit?: number, storeOptions?: CreateStoreOptions<PagingData> | null) => PagingStore;
+export declare function createStoragePagingStore(key: string, storageType?: 'local' | 'session' | 'memory', initial?: Partial<PagingData>, defaultLimit?: number): PagingStore;

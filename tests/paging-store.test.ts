@@ -4,7 +4,8 @@ import { strict as assert } from 'node:assert';
 import { fileURLToPath } from 'node:url';
 import { createClog } from '@marianmeres/clog';
 import { TestRunner } from '@marianmeres/test-runner';
-import { calculatePaging, createPagingStore } from '../src/index.js';
+import { calculatePaging, createPagingStore, PagingData } from '../src/index.js';
+import { createStoragePersistor } from '@marianmeres/store';
 
 const clog = createClog(path.basename(fileURLToPath(import.meta.url)));
 const suite = new TestRunner(path.basename(fileURLToPath(import.meta.url)));
@@ -96,6 +97,18 @@ suite.test('store', () => {
 	assert(_.isEqual(log, [FIRST, MIDDLE, LAST]));
 
 	unsub();
+});
+
+suite.test('persisted', () => {
+	const persistor = createStoragePersistor<PagingData>('foo', 'memory');
+	persistor.set({ total: 25, limit: 10, offset: 5 });
+
+	const store = createPagingStore(persistor.get() || {}, undefined, {
+		persist: persistor.set,
+	});
+
+	assert(store.get().total === 25);
+	assert(persistor.__raw().foo.total === 25);
 });
 
 export default suite;
