@@ -1,14 +1,10 @@
-import path from 'node:path';
-import _ from 'lodash';
-import { strict as assert } from 'node:assert';
-import { fileURLToPath } from 'node:url';
-import { createClog } from '@marianmeres/clog';
-import { TestRunner } from '@marianmeres/test-runner';
-import { calculatePaging, createPagingStore, PagingData } from '../src/index.js';
-import { createStoragePersistor } from '@marianmeres/store';
+import { assert } from "@std/assert";
+import { createStoragePersistor } from "@marianmeres/store";
+import { calculatePaging, createPagingStore, type PagingData } from "../src/mod.ts";
 
-const clog = createClog(path.basename(fileURLToPath(import.meta.url)));
-const suite = new TestRunner(path.basename(fileURLToPath(import.meta.url)));
+const _ = {
+	isEqual: (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b),
+};
 
 const FIRST = {
 	total: 25,
@@ -64,30 +60,26 @@ const LAST = {
 	lastOffset: 20,
 };
 
-suite.test('calculate paging 1', async () => {
-	let p = calculatePaging({ total: 25, limit: 10, offset: 0 });
-	delete (p as any).previosOffset; // bc issue hack
+Deno.test("calculate paging 1", () => {
+	const p = calculatePaging({ total: 25, limit: 10, offset: 0 });
 	assert(_.isEqual(p, FIRST));
 });
 
-suite.test('calculate paging 2', async () => {
-	let p = calculatePaging({ total: 25, limit: 10, offset: 11 });
-	delete (p as any).previosOffset; // bc issue hack
+Deno.test("calculate paging 2", () => {
+	const p = calculatePaging({ total: 25, limit: 10, offset: 11 });
 	assert(_.isEqual(p, MIDDLE));
 });
 
-suite.test('calculate paging 3', async () => {
-	let p = calculatePaging({ total: 25, limit: 10, offset: 23 });
-	delete (p as any).previosOffset; // bc issue hack
+Deno.test("calculate paging 3", () => {
+	const p = calculatePaging({ total: 25, limit: 10, offset: 23 });
 	assert(_.isEqual(p, LAST));
 });
 
-suite.test('store', () => {
+Deno.test("store", () => {
 	const s = createPagingStore({ total: 25, limit: 10, offset: 0 });
 
 	const log: any[] = [];
 	const unsub = s.subscribe((p) => {
-		delete (p as any).previosOffset; // bc issue hack
 		log.push(p);
 	});
 
@@ -99,8 +91,8 @@ suite.test('store', () => {
 	unsub();
 });
 
-suite.test('persisted', () => {
-	const persistor = createStoragePersistor<PagingData>('foo', 'memory');
+Deno.test("persisted", () => {
+	const persistor = createStoragePersistor<PagingData>("foo", "memory");
 	persistor.set({ total: 25, limit: 10, offset: 5 });
 
 	const store = createPagingStore(persistor.get() || {}, undefined, {
@@ -108,7 +100,32 @@ suite.test('persisted', () => {
 	});
 
 	assert(store.get().total === 25);
-	assert(persistor.__raw().foo.total === 25);
+	assert(persistor.__raw().get("foo")?.total === 25);
 });
 
-export default suite;
+Deno.test("edge case: total=0", () => {
+	const p = calculatePaging({ total: 0, limit: 10, offset: 0 });
+
+	assert(p.total === 0);
+	assert(p.pageCount === 0);
+	assert(p.currentPage === 1);
+	assert(p.isFirst === true);
+	assert(p.isLast === true); // No pages means we're at the end
+	assert(p.hasNext === false);
+	assert(p.hasPrevious === false);
+});
+
+Deno.test("edge case: limit=0 is normalized to 1", () => {
+	const p = calculatePaging({ total: 10, limit: 0, offset: 0 });
+
+	assert(p.limit === 1);
+	assert(p.pageCount === 10);
+});
+
+Deno.test("edge case: negative values are normalized", () => {
+	const p = calculatePaging({ total: -5, limit: -3, offset: -2 });
+
+	assert(p.total === 0);
+	assert(p.limit === 1);
+	assert(p.offset === 0);
+});
