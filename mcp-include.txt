@@ -1,0 +1,1 @@
+Utility for calculating paging metadata (currentPage, pageCount, pages list, hasPrev/hasNext, etc.) from offset-based pagination data, with a reactive store for state management.
