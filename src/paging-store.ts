@@ -26,8 +26,10 @@ export interface PagingCalcResult {
 	total: number;
 	/** Number of items per page. */
 	limit: number;
-	/** Current offset from the beginning. */
+	/** Current offset as provided (normalized and clamped to the valid range). */
 	offset: number;
+	/** Canonical offset of the current page's first item (`(currentPage - 1) * limit`). */
+	currentOffset: number;
 	/** Whether the current page is the last page. */
 	isLast: boolean;
 	/** Whether the current page is the first page. */
@@ -40,9 +42,15 @@ export interface PagingCalcResult {
 	hasNext: boolean;
 	/** Whether there is a previous page. */
 	hasPrevious: boolean;
-	/** Offset value to navigate to the next page. */
+	/**
+	 * Offset to navigate to the next page, or the current page's canonical offset when
+	 * there is no next page (safe fallback — check `hasNext` to distinguish).
+	 */
 	nextOffset: number;
-	/** Offset value to navigate to the previous page. */
+	/**
+	 * Offset to navigate to the previous page, or the current page's canonical offset
+	 * when there is no previous page (safe fallback — check `hasPrevious` to distinguish).
+	 */
 	previousOffset: number;
 	/** Current page number (1-indexed). */
 	currentPage: number;
@@ -58,30 +66,62 @@ export interface PagingCalcResult {
  * A reactive store that calculates and provides paging metadata.
  */
 export interface PagingStore extends StoreReadable<PagingCalcResult> {
-	/** Update paging data (total, limit, and/or offset). */
+	/** Update paging data (total, limit, and/or offset). Values are normalized. */
 	update: (pagingData: Partial<PagingData>) => void;
-	/** Reset to initial state with optional new limit. */
+	/** Reset to the first page. Preserves `total`; optionally changes `limit`. */
 	reset: (limit?: number) => void;
+	/** Navigate to a specific 1-indexed page. Clamped to the valid page range. */
+	setPage: (page: number) => void;
+	/** Change the page size. Offset is preserved and re-clamped to the new page range. */
+	setLimit: (limit: number) => void;
+	/** Navigate to the next page, or no-op when already on the last page. */
+	next: () => void;
+	/** Navigate to the previous page, or no-op when already on the first page. */
+	previous: () => void;
+	/** Navigate to the first page. */
+	first: () => void;
+	/** Navigate to the last page. */
+	last: () => void;
 }
 
 const _numberOr = (val: unknown, fallback = 0): number => {
-	const parsed = parseInt(String(val), 10);
-	return Number.isNaN(parsed) ? fallback : parsed;
+	if (val === null || val === undefined || val === "") return fallback;
+	const n = typeof val === "number" ? val : parseFloat(String(val));
+	return Number.isFinite(n) ? Math.trunc(n) : fallback;
 };
 
 const _normalize = (
 	{ total, limit, offset }: Partial<PagingData> = {},
 	defaultLimit?: number,
 ): PagingData => {
-	return {
-		total: Math.max(0, _numberOr(total, 0)),
-		limit: Math.max(1, _numberOr(limit, _numberOr(defaultLimit, 10))),
-		offset: Math.max(0, _numberOr(offset, 0)),
-	};
+	const t = Math.max(0, _numberOr(total, 0));
+	// Treat limit <= 0 (including an explicit 0) the same as "unset" — fall back to
+	// defaultLimit (or 10). The final Math.max(1, …) only guards a negative default.
+	const rawLimit = _numberOr(limit, NaN);
+	const l = Math.max(
+		1,
+		rawLimit > 0 ? rawLimit : _numberOr(defaultLimit, 10),
+	);
+	let o = Math.max(0, _numberOr(offset, 0));
+	// Clamp an out-of-range offset to the last page's canonical offset. Covers:
+	//   - total shrank below persisted offset
+	//   - caller passed an offset past the dataset
+	// Offsets within the current dataset (including non-page-aligned ones like 23
+	// for total=25, limit=10) are preserved.
+	if (t > 0) {
+		if (o >= t) o = (Math.ceil(t / l) - 1) * l;
+	} else {
+		o = 0;
+	}
+	return { total: t, limit: l, offset: o };
 };
 
 /**
  * Calculates the current page number (1-indexed) based on the offset.
+ *
+ * Inputs are normalized: negative values are clamped to 0 (for offset) or their minimum,
+ * and non-numeric values fall back to defaults. An offset beyond the dataset is clamped
+ * to the last page.
  *
  * @param pagingData - The paging data containing total, limit, and offset.
  * @returns The current page number (minimum 1).
@@ -91,41 +131,41 @@ const _normalize = (
  * pagingGetPageByOffset({ total: 100, limit: 10, offset: 25 }); // returns 3
  * ```
  */
-export const pagingGetPageByOffset = ({ total, limit, offset }: PagingData): number => {
-	// If negative, subtract from total
-	if (offset < 0) {
-		offset = Math.max(0, total + offset);
-	}
-	// Offset says to skip that many rows before beginning to return rows
-	offset++;
-	return Math.max(Math.ceil(offset / limit), 1);
+export const pagingGetPageByOffset = (pagingData: Partial<PagingData>): number => {
+	const { limit, offset } = _normalize(pagingData);
+	return Math.max(Math.ceil((offset + 1) / limit), 1);
 };
 
 /**
  * Calculates the offset for a given page number.
  *
- * @param pagingData - The paging data containing limit (total and offset are unused but kept for API consistency).
+ * Only `limit` is required; `total` and `offset` are used only as a fallback when `page`
+ * is not a valid number (returns the current page's offset instead).
+ *
+ * @param pagingData - Partial paging data (at minimum, `limit`).
  * @param page - The target page number (1-indexed).
- * @returns The offset value for the given page.
+ * @returns The offset value for the given page (minimum 0).
  *
  * @example
  * ```ts
- * pagingGetOffsetByPage({ total: 100, limit: 10, offset: 0 }, 3); // returns 20
+ * pagingGetOffsetByPage({ limit: 10 }, 3); // returns 20
  * ```
  */
 export const pagingGetOffsetByPage = (
-	{ total, limit, offset }: PagingData,
+	pagingData: Partial<PagingData>,
 	page: number,
 ): number => {
-	page = _numberOr(page, pagingGetPageByOffset({ total, limit, offset }));
-	return Math.max(limit * (page - 1), 0);
+	const normalized = _normalize(pagingData);
+	const p = _numberOr(page, pagingGetPageByOffset(normalized));
+	return Math.max(normalized.limit * (p - 1), 0);
 };
 
 /**
  * Calculates comprehensive paging metadata from the given input.
  *
  * Values are normalized: total and offset have a minimum of 0, limit has a minimum of 1.
- * Missing values default to: total=0, limit=10, offset=0.
+ * Missing values default to: total=0, limit=10, offset=0. An offset that lands past the
+ * end of the dataset is clamped to the last page's canonical offset.
  *
  * @param pagingData - Partial paging data.
  * @returns Complete paging calculation result with navigation metadata.
@@ -145,24 +185,30 @@ export const calculatePaging = (
 	const { total, limit, offset } = normalized;
 
 	const pageCount = Math.ceil(total / limit);
-	const currentPage = pagingGetPageByOffset(normalized);
+	const rawPage = pagingGetPageByOffset(normalized);
+	// With offset clamped in _normalize, rawPage is already in [1, max(1, pageCount)].
+	// The min() is a belt-and-braces guard so any future code path still yields a
+	// consistent currentPage.
+	const currentPage = pageCount > 0 ? Math.min(rawPage, pageCount) : 1;
+	const currentOffset = (currentPage - 1) * limit;
+
 	const isFirst = currentPage === 1;
-	// When there are no pages (total=0), consider it the last page (nothing comes after)
-	const isLast = pageCount === 0 || currentPage === pageCount;
+	// When there are no pages (total=0), consider it the last page (nothing comes after).
+	const isLast = pageCount === 0 || currentPage >= pageCount;
 
-	const nextPage = pageCount >= currentPage + 1 ? currentPage + 1 : false;
+	const nextPage = !isLast ? currentPage + 1 : false;
 	const hasNext = nextPage !== false;
-	const nextOffset = (hasNext ? currentPage : currentPage - 1) * limit;
+	const nextOffset = hasNext ? currentPage * limit : currentOffset;
 
-	const _previousPage = Math.max(0, Math.min(currentPage - 1, pageCount - 1));
-	const previousPage = _previousPage !== 0 ? _previousPage : false;
+	const previousPage = !isFirst && pageCount > 0 ? currentPage - 1 : false;
 	const hasPrevious = previousPage !== false;
-	const previousOffset = previousPage === false ? 0 : (previousPage - 1) * limit;
+	const previousOffset = hasPrevious ? (currentPage - 2) * limit : currentOffset;
 
 	return {
 		total,
 		limit,
 		offset,
+		currentOffset,
 		isLast,
 		isFirst,
 		nextPage,
@@ -185,7 +231,7 @@ export const calculatePaging = (
  * @param pagingData - Initial paging data.
  * @param defaultLimit - Default page size (default: 10).
  * @param storeOptions - Optional store configuration (e.g., for persistence).
- * @returns A PagingStore with subscribe, get, update, and reset methods.
+ * @returns A PagingStore with subscribe, get, update, reset, and navigation methods.
  *
  * @example
  * ```ts
@@ -195,8 +241,9 @@ export const calculatePaging = (
  *   console.log(`Page ${paging.currentPage} of ${paging.pageCount}`);
  * });
  *
- * store.update({ offset: 20 }); // Navigate to page 3
- * store.reset(); // Reset to first page
+ * store.setPage(3);   // Navigate to page 3
+ * store.next();       // Navigate to page 4
+ * store.reset();      // Back to first page (preserves total)
  * ```
  */
 export const createPagingStore = (
@@ -208,17 +255,47 @@ export const createPagingStore = (
 		_normalize(pagingData, defaultLimit),
 		storeOptions,
 	);
-	const paging = createDerivedStore<PagingCalcResult>(
-		[_data],
-		([data]) => calculatePaging(data),
+	const paging = createDerivedStore<PagingCalcResult, PagingData>(
+		_data,
+		(data) => calculatePaging(data),
 	);
+
+	const _update = (patch: Partial<PagingData>) =>
+		_data.update((old) => _normalize({ ...old, ...patch }, defaultLimit));
+
+	const setPage = (page: number) => {
+		const { limit } = _data.get();
+		_update({ offset: (Math.max(1, _numberOr(page, 1)) - 1) * limit });
+	};
 
 	return {
 		subscribe: paging.subscribe,
 		get: paging.get,
-		update: (data: Partial<PagingData>) =>
-			_data.update((old) => _normalize({ ...old, ...data }, defaultLimit)),
-		reset: (limit?: number) => _data.set(_normalize({}, limit ?? defaultLimit)),
+		update: _update,
+		reset: (limit?: number) => {
+			const current = _data.get();
+			_data.set(
+				_normalize(
+					{ total: current.total, limit: limit ?? current.limit, offset: 0 },
+					defaultLimit,
+				),
+			);
+		},
+		setPage,
+		setLimit: (limit: number) => _update({ limit }),
+		next: () => {
+			const p = paging.get();
+			if (p.hasNext) setPage(p.currentPage + 1);
+		},
+		previous: () => {
+			const p = paging.get();
+			if (p.hasPrevious) setPage(p.currentPage - 1);
+		},
+		first: () => setPage(1),
+		last: () => {
+			const p = paging.get();
+			setPage(Math.max(1, p.pageCount));
+		},
 	};
 };
 

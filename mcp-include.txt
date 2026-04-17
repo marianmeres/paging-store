@@ -1,1 +1,4 @@
-Utility for calculating paging metadata (currentPage, pageCount, pages list, hasPrev/hasNext, etc.) from offset-based pagination data, with a reactive store for state management.
+Utility for calculating paging metadata (currentPage, pageCount, hasPrev/hasNext,
+next/previous offsets, etc.) from offset-based pagination data, with a reactive store
+for state management and ergonomic navigation helpers (setPage, next, previous, first,
+last, setLimit).
